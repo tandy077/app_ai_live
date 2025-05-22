@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API请求排队系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3B82F6',
+            secondary: '#10B981',
+            warning: '#F59E0B',
+            danger: '#EF4444',
+            dark: '#1E293B',
+            light: '#F8FAFC'
+          },
+          fontFamily: {
+            inter: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      }
+    }
+  </script>
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .animate-pulse-slow {
+        animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      .animate-progress {
+        animation: progress 1.5s ease-in-out infinite;
+      }
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .text-shadow {
+        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+    }
+
+    @keyframes progress {
+      0% { width: 0%; }
+      100% { width: 100%; }
+    }
+  </style>
+</head>
+<body class="font-inter bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+  <!-- 导航栏 -->
+  <nav class="bg-white shadow-md sticky top-0 z-50 transition-all duration-300">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between h-16">
+        <div class="flex items-center">
+          <i class="fa fa-server text-primary text-2xl mr-3"></i>
+          <span class="text-xl font-bold text-dark">API请求排队系统</span>
+        </div>
+        <div class="flex items-center space-x-4">
+          <span class="text-sm text-gray-500 hidden md:block">
+            <i class="fa fa-info-circle text-primary"></i> 控制并发请求数量，防止系统过载
+          </span>
+          <button id="theme-toggle" class="p-2 rounded-full hover:bg-gray-100 transition-colors">
+            <i class="fa fa-moon text-gray-600"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 主要内容区 -->
+  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <!-- 左侧控制面板 -->
+      <div class="lg:col-span-1">
+        <div class="bg-white rounded-xl shadow-lg p-6 transition-all duration-300 hover:shadow-xl">
+          <h2 class="text-xl font-bold mb-4 flex items-center">
+            <i class="fa fa-sliders text-primary mr-2"></i> 请求配置
+          </h2>
+          
+          <div class="space-y-5">
+            <div>
+              <label for="api-url" class="block text-sm font-medium text-gray-700 mb-1">API URL</label>
+              <input type="text" id="api-url" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all" value="https://jsonplaceholder.typicode.com/posts" placeholder="输入API地址">
+            </div>
+            
+            <div>
+              <label for="concurrency" class="block text-sm font-medium text-gray-700 mb-1">并发数限制</label>
+              <div class="flex items-center">
+                <input type="range" id="concurrency" min="1" max="20" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
+                <span id="concurrency-value" class="ml-3 text-sm font-medium text-gray-700 min-w-[2rem] text-center">5</span>
+              </div>
+            </div>
+            
+            <div>
+              <label for="request-count" class="block text-sm font-medium text-gray-700 mb-1">请求总数</label>
+              <input type="number" id="request-count" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all" value="20" min="1" max="100">
+            </div>
+            
+            <div>
+              <label for="delay" class="block text-sm font-medium text-gray-700 mb-1">请求间隔(ms)</label>
+              <input type="number" id="delay" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all" value="200" min="0">
+            </div>
+            
+            <div>
+              <label for="method" class="block text-sm font-medium text-gray-700 mb-1">请求方法</label>
+              <select id="method" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+            
+            <div class="pt-2">
+              <button id="start-requests" class="w-full bg-primary hover:bg-primary/90 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                <i class="fa fa-play mr-2"></i> 开始请求
+              </button>
+              <button id="stop-requests" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center mt-2 shadow-sm hover:shadow-md" disabled>
+                <i class="fa fa-stop mr-2"></i> 停止请求
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 统计信息 -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mt-6 transition-all duration-300 hover:shadow-xl">
+          <h2 class="text-xl font-bold mb-4 flex items-center">
+            <i class="fa fa-chart-line text-primary mr-2"></i> 统计信息
+          </h2>
+          
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-gray-50 p-3 rounded-lg">
+              <div class="text-sm text-gray-500">总请求数</div>
+              <div id="total-requests" class="text-2xl font-bold text-dark">0</div>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+              <div class="text-sm text-gray-500">成功请求</div>
+              <div id="success-requests" class="text-2xl font-bold text-secondary">0</div>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+              <div class="text-sm text-gray-500">失败请求</div>
+              <div id="failed-requests" class="text-2xl font-bold text-danger">0</div>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+              <div class="text-sm text-gray-500">平均响应时间</div>
+              <div id="avg-response-time" class="text-2xl font-bold text-primary">0ms</div>
+            </div>
+          </div>
+          
+          <div class="mt-4">
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-gray-500">队列状态</span>
+              <span id="queue-length" class="font-medium">0/0</span>
+            </div>
+            <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div id="queue-progress" class="h-full bg-primary transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 右侧请求日志 -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl">
+          <div class="p-6 border-b border-gray-100 flex justify-between items-center">
+            <h2 class="text-xl font-bold flex items-center">
+              <i class="fa fa-list-alt text-primary mr-2"></i> 请求日志
+            </h2>
+            <div class="flex space-x-2">
+              <button id="clear-log" class="text-sm text-gray-500 hover:text-danger transition-colors flex items-center">
+                <i class="fa fa-trash mr-1"></i> 清空
+              </button>
+              <button id="pause-log" class="text-sm text-gray-500 hover:text-primary transition-colors flex items-center">
+                <i class="fa fa-pause mr-1"></i> 暂停
+              </button>
+            </div>
+          </div>
+          
+          <div class="relative">
+            <div id="log-container" class="h-[500px] overflow-y-auto scrollbar-hide p-4 space-y-3">
+              <div class="text-center text-gray-400 py-10">
+                <i class="fa fa-info-circle text-2xl mb-2 block"></i>
+                <p>等待请求开始...</p>
+              </div>
+            </div>
+            
+            <!-- 滚动到底部按钮 -->
+            <button id="scroll-to-bottom" class="absolute bottom-4 right-4 bg-primary/90 hover:bg-primary text-white rounded-full p-2 shadow-lg transition-all transform hover:scale-110 opacity-0 pointer-events-none">
+              <i class="fa fa-chevron-down"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 页脚 -->
+  <footer class="bg-white border-t border-gray-200 py-6 mt-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col md:flex-row justify-between items-center">
+        <div class="text-gray-500 text-sm">
+          © 2025 API请求排队系统 - 优化前端请求管理
+        </div>
+        <div class="mt-4 md:mt-0">
+          <a href="#" class="text-gray-500 hover:text-primary mx-2 transition-colors">
+            <i class="fa fa-github"></i> GitHub
+          </a>
+          <a href="#" class="text-gray-500 hover:text-primary mx-2 transition-colors">
+            <i class="fa fa-documentation"></i> 文档
+          </a>
+          <a href="#" class="text-gray-500 hover:text-primary mx-2 transition-colors">
+            <i class="fa fa-question-circle"></i> 帮助
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // API请求队列管理器
+    class APIQueueManager {
+      constructor() {
+        this.queue = []; // 请求队列
+        this.running = 0; // 当前正在执行的请求数
+        this.maxConcurrency = 5; // 最大并发数
+        this.isProcessing = false; // 是否正在处理队列
+        this.totalRequests = 0; // 总请求数
+        this.successRequests = 0; // 成功请求数
+        this.failedRequests = 0; // 失败请求数
+        this.totalResponseTime = 0; // 总响应时间
+        this.requests = []; // 所有请求记录
+        
+        // DOM元素
+        this.elements = {
+          logContainer: document.getElementById('log-container'),
+          totalRequests: document.getElementById('total-requests'),
+          successRequests: document.getElementById('success-requests'),
+          failedRequests: document.getElementById('failed-requests'),
+          avgResponseTime: document.getElementById('avg-response-time'),
+          queueLength: document.getElementById('queue-length'),
+          queueProgress: document.getElementById('queue-progress'),
+          startButton: document.getElementById('start-requests'),
+          stopButton: document.getElementById('stop-requests'),
+          scrollToBottom: document.getElementById('scroll-to-bottom')
+        };
+        
+        // 绑定事件处理函数
+        this.bindEvents();
+      }
+      
+      // 绑定事件
+      bindEvents() {
+        // 并发数滑块事件
+        const concurrencySlider = document.getElementById('concurrency');
+        const concurrencyValue = document.getElementById('concurrency-value');
+        concurrencySlider.addEventListener('input', (e) => {
+          this.maxConcurrency = parseInt(e.target.value);
+          concurrencyValue.textContent = this.maxConcurrency;
+          this.processQueue(); // 更新并发数后重新处理队列
+        });
+        
+        // 开始请求按钮
+        this.elements.startButton.addEventListener('click', () => this.startRequests());
+        
+        // 停止请求按钮
+        this.elements.stopButton.addEventListener('click', () => this.stopRequests());
+        
+        // 清空日志按钮
+        document.getElementById('clear-log').addEventListener('click', () => this.clearLog());
+        
+        // 暂停/继续日志滚动按钮
+        const pauseButton = document.getElementById('pause-log');
+        this.isLogPaused = false;
+        pauseButton.addEventListener('click', () => {
+          this.isLogPaused = !this.isLogPaused;
+          pauseButton.innerHTML = this.isLogPaused ? 
+            '<i class="fa fa-play mr-1"></i> 继续' : 
+            '<i class="fa fa-pause mr-1"></i> 暂停';
+        });
+        
+        // 滚动到底部按钮
+        this.elements.scrollToBottom.addEventListener('click', () => {
+          this.scrollToBottom();
+          this.elements.scrollToBottom.classList.add('opacity-0', 'pointer-events-none');
+        });
+        
+        // 监听日志容器滚动事件
+        this.elements.logContainer.addEventListener('scroll', () => {
+          const isAtBottom = this.elements.logContainer.scrollHeight - this.elements.logContainer.scrollTop <= 
+                             this.elements.logContainer.clientHeight + 10;
+          
+          if (!isAtBottom && !this.isLogPaused) {
+            this.elements.scrollToBottom.classList.remove('opacity-0', 'pointer-events-none');
+          } else {
+            this.elements.scrollToBottom.classList.add('opacity-0', 'pointer-events-none');
+          }
+        });
+        
+        // 主题切换
+        const themeToggle = document.getElementById('theme-toggle');
+        this.isDarkMode = false;
+        themeToggle.addEventListener('click', () => {
+          this.isDarkMode = !this.isDarkMode;
+          document.body.classList.toggle('bg-gray-900', this.isDarkMode);
+          document.body.classList.toggle('text-gray-100', this.isDarkMode);
+          document.querySelectorAll('.bg-white').forEach(el => {
+            el.classList.toggle('bg-gray-800', this.isDarkMode);
+            el.classList.toggle('bg-white', !this.isDarkMode);
+          });
+          document.querySelectorAll('.bg-gray-50').forEach(el => {
+            el.classList.toggle('bg-gray-700', this.isDarkMode);
+            el.classList.toggle('bg-gray-50', !this.isDarkMode);
+          });
+          document.querySelectorAll('.text-gray-700').forEach(el => {
+            el.classList.toggle('text-gray-300', this.isDarkMode);
+            el.classList.toggle('text-gray-700', !this.isDarkMode);
+          });
+          document.querySelectorAll('.text-gray-500').forEach(el => {
+            el.classList.toggle('text-gray-400', this.isDarkMode);
+            el.classList.toggle('text-gray-500', !this.isDarkMode);
+          });
+          document.querySelectorAll('.text-dark').forEach(el => {
+            el.classList.toggle('text-white', this.isDarkMode);
+            el.classList.toggle('text-dark', !this.isDarkMode);
+          });
+          themeToggle.innerHTML = this.isDarkMode ? 
+            '<i class="fa fa-sun text-yellow-400"></i>' : 
+            '<i class="fa fa-moon text-gray-600"></i>';
+        });
+      }
+      
+      // 开始请求
+      startRequests() {
+        const apiUrl = document.getElementById('api-url').value;
+        const requestCount = parseInt(document.getElementById('request-count').value);
+        const delay = parseInt(document.getElementById('delay').value);
+        const method = document.getElementById('method').value;
+        
+        // 清空之前的队列和统计信息
+        this.clearQueue();
+        this.clearLog();
+        this.resetStats();
+        
+        // 生成请求队列
+        for (let i = 1; i <= requestCount; i++) {
+          this.queue.push({
+            id: i,
+            url: apiUrl,
+            method,
+            timestamp: new Date().getTime()
+          });
+          
+          // 添加延迟
+          if (i < requestCount && delay > 0) {
+            this.queue.push({ type: 'delay', ms: delay });
+          }
+        }
+        
+        this.totalRequests = requestCount;
+        this.updateStats();
+        
+        // 更新UI状态
+        this.elements.startButton.disabled = true;
+        this.elements.startButton.classList.remove('bg-primary', 'hover:bg-primary/90');
+        this.elements.startButton.classList.add('bg-gray-300', 'text-gray-500');
+        
+        this.elements.stopButton.disabled = false;
+        this.elements.stopButton.classList.remove('bg-gray-200', 'hover:bg-gray-300', 'text-gray-700');
+        this.elements.stopButton.classList.add('bg-danger', 'hover:bg-danger/90', 'text-white');
+        
+        // 开始处理队列
+        this.isProcessing = true;
+        this.processQueue();
+      }
+      
+      // 停止请求
+      stopRequests() {
+        this.isProcessing = false;
+        this.queue = [];
+        
+        // 更新UI状态
+        this.elements.startButton.disabled = false;
+        this.elements.startButton.classList.remove('bg-gray-300', 'text-gray-500');
+        this.elements.startButton.classList.add('bg-primary', 'hover:bg-primary/90', 'text-white');
+        
+        this.elements.stopButton.disabled = true;
+        this.elements.stopButton.classList.remove('bg-danger', 'hover:bg-danger/90', 'text-white');
+        this.elements.stopButton.classList.add('bg-gray-200', 'hover:bg-gray-300', 'text-gray-700');
+        
+        this.log('请求队列已停止', 'info');
+      }
+      
+      // 处理队列
+      async processQueue() {
+        if (!this.isProcessing || this.running >= this.maxConcurrency || this.queue.length === 0) {
+          return;
+        }
+        
+        // 从队列中取出请求
+        const task = this.queue.shift();
+        this.updateStats();
+        
+        // 处理延迟任务
+        if (task.type === 'delay') {
+          setTimeout(() => this.processQueue(), task.ms);
+          return;
+        }
+        
+        // 执行请求
+        this.running++;
+        const requestId = task.id;
+        const requestStart = new Date().getTime();
+        
+        // 添加请求开始日志
+        const logEntry = this.log(`请求 #${requestId} 开始 (${task.method} ${task.url})`, 'pending', requestId);
+        
+        try {
+          // 执行API请求
+          const response = await fetch(task.url, { method: task.method });
+          const responseTime = new Date().getTime() - requestStart;
+          
+          if (response.ok) {
+            // 请求成功
+            this.successRequests++;
+            this.totalResponseTime += responseTime;
+            this.updateLog(logEntry, `请求 #${requestId} 成功 (${responseTime}ms)`, 'success', requestId, responseTime);
+          } else {
+            // 请求失败（HTTP错误）
+            this.failedRequests++;
+            this.updateLog(logEntry, `请求 #${requestId} 失败 (${response.status} ${response.statusText})`, 'error', requestId);
+          }
+        } catch (error) {
+          // 请求失败（网络错误）
+          const responseTime = new Date().getTime() - requestStart;
+          this.failedRequests++;
+          this.updateLog(logEntry, `请求 #${requestId} 失败 (网络错误: ${error.message})`, 'error', requestId, responseTime);
+        } finally {
+          this.running--;
+          this.updateStats();
+          
+          // 继续处理队列
+          this.processQueue();
+        }
+      }
+      
+      // 记录日志
+      log(message, type = 'info', requestId = null) {
+        const logItem = document.createElement('div');
+        logItem.className = `p-3 rounded-lg transition-all duration-300 ${
+          type === 'success' ? 'bg-green-50 border-l-4 border-secondary' :
+          type === 'error' ? 'bg-red-50 border-l-4 border-danger' :
+          type === 'pending' ? 'bg-blue-50 border-l-4 border-primary animate-pulse-slow' :
+          'bg-gray-50 border-l-4 border-gray-300'
+        }`;
+        
+        // 生成时间戳
+        const now = new Date();
+        const timeString = now.toLocaleTimeString();
+        
+        // 设置日志内容
+        logItem.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-medium ${
+                type === 'success' ? 'text-secondary' :
+                type === 'error' ? 'text-danger' :
+                type === 'pending' ? 'text-primary' :
+                'text-gray-700'
+              }">${message}</span>
+            </div>
+            <span class="text-xs text-gray-500 whitespace-nowrap ml-2">${timeString}</span>
+          </div>
+          ${requestId ? `<div class="mt-1 text-xs text-gray-500">请求ID: #${requestId}</div>` : ''}
+        `;
+        
+        // 添加到日志容器
+        this.elements.logContainer.appendChild(logItem);
+        
+        // 自动滚动到底部
+        if (!this.isLogPaused) {
+          this.scrollToBottom();
+        }
+        
+        return logItem;
+      }
+      
+      // 更新日志条目
+      updateLog(logItem, message, type, requestId, responseTime = null) {
+        // 移除动画类
+        logItem.classList.remove('animate-pulse-slow');
+        
+        // 更新样式
+        logItem.className = `p-3 rounded-lg transition-all duration-300 ${
+          type === 'success' ? 'bg-green-50 border-l-4 border-secondary' :
+          type === 'error' ? 'bg-red-50 border-l-4 border-danger' :
+          'bg-gray-50 border-l-4 border-gray-300'
+        }`;
+        
+        // 更新内容
+        const timeElement = logItem.querySelector('.text-xs.text-gray-500');
+        const timeString = timeElement.textContent;
+        
+        logItem.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-medium ${
+                type === 'success' ? 'text-secondary' :
+                type === 'error' ? 'text-danger' :
+                'text-gray-700'
+              }">${message}</span>
+            </div>
+            <span class="text-xs text-gray-500 whitespace-nowrap ml-2">${timeString}</span>
+          </div>
+          <div class="mt-1 flex justify-between text-xs text-gray-500">
+            <span>请求ID: #${requestId}</span>
+            ${responseTime ? `<span>响应时间: ${responseTime}ms</span>` : ''}
+          </div>
+        `;
+        
+        // 自动滚动到底部
+        if (!this.isLogPaused) {
+          this.scrollToBottom();
+        }
+      }
+      
+      // 清空日志
+      clearLog() {
+        this.elements.logContainer.innerHTML = `
+          <div class="text-center text-gray-400 py-10">
+            <i class="fa fa-info-circle text-2xl mb-2 block"></i>
+            <p>日志已清空</p>
+          </div>
+        `;
+      }
+      
+      // 清空队列
+      clearQueue() {
+        this.queue = [];
+        this.running = 0;
+        this.isProcessing = false;
+        this.updateStats();
+      }
+      
+      // 重置统计信息
+      resetStats() {
+        this.totalRequests = 0;
+        this.successRequests = 0;
+        this.failedRequests = 0;
+        this.totalResponseTime = 0;
+        
+        this.elements.totalRequests.textContent = '0';
+        this.elements.successRequests.textContent = '0';
+        this.elements.failedRequests.textContent = '0';
+        this.elements.avgResponseTime.textContent = '0ms';
+        this.elements.queueLength.textContent = '0/0';
+        this.elements.queueProgress.style.width = '0%';
+      }
+      
+      // 更新统计信息
+      updateStats() {
+        this.elements.totalRequests.textContent = this.totalRequests;
+        this.elements.successRequests.textContent = this.successRequests;
+        this.elements.failedRequests.textContent = this.failedRequests;
+        
+        // 计算平均响应时间
+        const avgTime = this.successRequests > 0 ? Math.round(this.totalResponseTime / this.successRequests) : 0;
+        this.elements.avgResponseTime.textContent = `${avgTime}ms`;
+        
+        // 更新队列状态
+        const remainingRequests = this.queue.filter(task => !task.type).length;
+        const totalQueued = this.queue.length;
+        this.elements.queueLength.textContent = `${remainingRequests}/${this.totalRequests}`;
+        
+        // 更新进度条
+        const completed = this.successRequests + this.failedRequests;
+        const progressPercent = this.totalRequests > 0 ? (completed / this.totalRequests) * 100 : 0;
+        this.elements.queueProgress.style.width = `${progressPercent}%`;
+        
+        // 如果所有请求都完成了
+        if (completed === this.totalRequests && this.isProcessing) {
+          this.isProcessing = false;
+          
+          // 更新UI状态
+          this.elements.startButton.disabled = false;
+          this.elements.startButton.classList.remove('bg-gray-300', 'text-gray-500');
+          this.elements.startButton.classList.add('bg-primary', 'hover:bg-primary/90', 'text-white');
+          
+          this.elements.stopButton.disabled = true;
+          this.elements.stopButton.classList.remove('bg-danger', 'hover:bg-danger/90', 'text-white');
+          this.elements.stopButton.classList.add('bg-gray-200', 'hover:bg-gray-300', 'text-gray-700');
+          
+          // 添加完成日志
+          this.log(`所有请求已完成: ${this.successRequests} 成功, ${this.failedRequests} 失败`, 'success');
+        }
+      }
+      
+      // 滚动到底部
+      scrollToBottom() {
+        this.elements.logContainer.scrollTop = this.elements.logContainer.scrollHeight;
+      }
+    }
+    
+    // 初始化队列管理器
+    document.addEventListener('DOMContentLoaded', () => {
+      const queueManager = new APIQueueManager();
+    });
+  </script>
+</body>
+</html>
+  
