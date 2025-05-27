@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logon in</title>
+</head>
+
+<body>
+
+    <script>
+        // ==================== 前端实现方案 ====================
+        // 使用axios作为HTTP客户端示例
+
+        // 1. 创建axios实例
+        const apiClient = axios.create({
+            baseURL: process.env.API_BASE_URL,
+            timeout: 10000
+        });
+
+        // 2. 请求拦截器 - 添加认证令牌
+        apiClient.interceptors.request.use(config => {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                config.headers.Authorization = `Bearer ${token}`;
+            }
+            return config;
+        }, error => Promise.reject(error));
+
+        // 3. 响应拦截器 - 处理401错误
+        apiClient.interceptors.response.use(
+            response => response,
+            async error => {
+                const originalRequest = error.config;
+
+                // 处理401未授权
+                if (error.response?.status === 401 && !originalRequest._retry) {
+                    // 情况1：未登录用户
+                    if (!localStorage.getItem('refresh_token')) {
+                        clearAuthStorage();
+                        redirectToLogin();
+                        return Promise.reject(error);
+                    }
+
+                    // 情况2：访问令牌过期，尝试刷新
+                    originalRequest._retry = true;
+                    try {
+                        const { data } = await refreshToken();
+                        setNewTokens(data);
+                        originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+                        return apiClient(originalRequest);
+                    } catch (refreshError) {
+                        handleAuthFailure();
+                        return Promise.reject(refreshError);
+                    }
+                }
+
+                return Promise.reject(error);
+            }
+        );
+
+        // ==================== 认证工具函数 ====================
+        // 存储令牌
+        const setNewTokens = ({ access_token, refresh_token }) => {
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', refresh_token);
+        };
+
+        // 清除认证信息
+        const clearAuthStorage = () => {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+        };
+
+        // 跳转登录页
+        const redirectToLogin = () => {
+            if (window.location.pathname !== '/login') {
+                window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+            }
+        };
+
+        // 令牌刷新函数
+        const refreshToken = async () => {
+            const refreshToken = localStorage.getItem('refresh_token');
+            return axios.post('/auth/refresh', {
+                refresh_token: refreshToken
+            });
+        };
+
+        // ==================== 路由守卫示例（React） ====================
+        const AuthRoute = ({ children }) => {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const location = useLocation();
+
+            useEffect(() => {
+                const checkAuth = async () => {
+                    try {
+                        // 发起一个轻量级认证检查请求
+                        await apiClient.get('/auth/check');
+                        setIsAuthenticated(true);
+                    } catch (error) {
+                        if (error.response?.status === 401) {
+                            clearAuthStorage();
+                            redirectToLogin();
+                        }
+                    }
+                };
+
+                checkAuth();
+            }, []);
+
+            return isAuthenticated ? children : <LoadingSpinner />;
+        };
+
+        // ==================== 登录处理示例 ====================
+        const handleLogin = async (credentials) => {
+            try {
+                const { data } = await apiClient.post('/auth/login', credentials);
+
+                // 设置令牌并重定向
+                setNewTokens(data);
+                const redirectUrl = new URLSearchParams(window.location.search).get('redirect');
+                window.location.href = redirectUrl || '/dashboard';
+            } catch (error) {
+                console.error('登录失败:', error);
+                showErrorMessage('无效的登录凭证');
+            }
+        };
+
+        // ==================== 服务端中间件示例（Node.js） ====================
+        const authMiddleware = (req, res, next) => {
+            try {
+                const authHeader = req.headers.authorization;
+                if (!authHeader?.startsWith('Bearer ')) {
+                    return res.status(401).json({ message: '未提供访问令牌' });
+                }
+
+                const token = authHeader.split(' ')[1];
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+                req.user = {
+                    userId: decoded.sub,
+                    role: decoded.role
+                };
+
+                next();
+            } catch (err) {
+                if (err.name === 'TokenExpiredError') {
+                    return res.status(401).json({ code: 'TOKEN_EXPIRED' });
+                }
+                return res.status(401).json({ message: '无效令牌' });
+            }
+        };
+    </script>
+</body>
+
+</html>
